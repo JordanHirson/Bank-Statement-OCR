@@ -1,0 +1,5 @@
+{
+  "name": "Bank Statement OCR",
+  "description": "Extract transaction data from bank statement images and PDFs into CSV format using AI.",
+  "requestFramePermissions": []
+}
