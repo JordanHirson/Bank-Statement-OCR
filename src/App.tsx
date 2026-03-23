@@ -1,10 +1,10 @@
 import React, { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Upload, FileText, Download, Loader2, Trash2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Upload, FileText, Download, Loader2, Trash2, AlertCircle, CheckCircle2, Search, ArrowUpDown, ArrowUp, ArrowDown, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { extractTransactions, Transaction } from './services/ocrService';
+import { extractTransactions, Transaction, FileData } from './services/ocrService';
 import { convertToCSV, downloadCSV } from './utils';
 
 function cn(...inputs: ClassValue[]) {
@@ -17,6 +17,10 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // Sorting state
+  const [sortField, setSortField] = useState<keyof Transaction>('date');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setFiles(prev => [...prev, ...acceptedFiles]);
@@ -48,13 +52,18 @@ export default function App() {
     const allExtracted: Transaction[] = [];
 
     try {
-      const processingPromises = files.map(async (file) => {
-        const base64 = await fileToBase64(file);
-        return extractTransactions(base64, file.type);
-      });
-
-      const resultsArray = await Promise.all(processingPromises);
-      resultsArray.forEach(results => allExtracted.push(...results));
+      // Chunk files to process in batches of 10 for optimal speed and reliability
+      const CHUNK_SIZE = 10;
+      for (let i = 0; i < files.length; i += CHUNK_SIZE) {
+        const chunk = files.slice(i, i + CHUNK_SIZE);
+        const fileDataArray = await Promise.all(chunk.map(async (file) => ({
+          data: await fileToBase64(file),
+          mimeType: file.type
+        })));
+        
+        const results = await extractTransactions(fileDataArray);
+        allExtracted.push(...results);
+      }
       
       setTransactions(allExtracted);
       setSuccess(`Successfully extracted ${allExtracted.length} transactions.`);
@@ -91,6 +100,18 @@ export default function App() {
     setSuccess(null);
   };
 
+  const sortedTransactions = React.useMemo(() => {
+    return [...transactions].sort((a, b) => {
+      const aValue = a[sortField];
+      const bValue = b[sortField];
+
+      if (aValue === bValue) return 0;
+
+      const comparison = aValue < bValue ? -1 : 1;
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+  }, [transactions, sortField, sortDirection]);
+
   const stats = React.useMemo(() => {
     const income = transactions.reduce((acc, t) => t.amount > 0 ? acc + t.amount : acc, 0);
     const spending = transactions.reduce((acc, t) => t.amount < 0 ? acc + t.amount : acc, 0);
@@ -102,6 +123,20 @@ export default function App() {
       net: income + spending
     };
   }, [transactions, files]);
+
+  const toggleSort = (field: keyof Transaction) => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  };
+
+  const SortIcon = ({ field }: { field: keyof Transaction }) => {
+    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 ml-1 opacity-30" />;
+    return sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 ml-1" /> : <ArrowDown className="w-3 h-3 ml-1" />;
+  };
 
   return (
     <div className="min-h-screen bg-[#f5f5f5] text-[#1a1a1a] font-sans p-4 md:p-8">
@@ -232,70 +267,151 @@ export default function App() {
             </AnimatePresence>
 
             <div className="bg-white rounded-3xl shadow-sm border border-black/5 min-h-[500px] flex flex-col overflow-hidden">
-              <div className="p-6 border-bottom border-black/5 flex items-center justify-between bg-white sticky top-0 z-10">
-                <h2 className="text-xl font-medium">Transaction Details</h2>
-                {transactions.length > 0 && (
-                  <button
-                    onClick={handleDownload}
-                    className="flex items-center gap-2 text-sm font-semibold bg-[#f5f5f5] px-4 py-2 rounded-full hover:bg-[#e5e5e5] transition-colors"
-                  >
-                    <Download className="w-4 h-4" />
-                    Export CSV
-                  </button>
-                )}
+              <div className="p-6 border-b border-black/5 bg-white sticky top-0 z-10">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-medium">Transaction Details</h2>
+                <div className="flex items-center gap-2">
+                  {transactions.length > 0 && (
+                    <>
+                      <button
+                        onClick={clearAll}
+                        className="flex items-center gap-2 text-sm font-semibold text-red-500 bg-red-50 px-4 py-2 rounded-full hover:bg-red-100 transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        Clear All
+                      </button>
+                      <button
+                        onClick={handleDownload}
+                        className="flex items-center gap-2 text-sm font-semibold bg-[#f5f5f5] px-4 py-2 rounded-full hover:bg-[#e5e5e5] transition-colors"
+                      >
+                        <Download className="w-4 h-4" />
+                        Export CSV
+                      </button>
+                    </>
+                  )}
+                </div>
+                </div>
               </div>
 
-              <div className="flex-1 overflow-auto p-6">
+              <div className="flex-1 overflow-auto">
                 {error && (
-                  <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center gap-3 text-red-600 text-sm">
+                  <div className="m-6 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center gap-3 text-red-600 text-sm">
                     <AlertCircle className="w-5 h-5" />
                     {error}
                   </div>
                 )}
 
                 {success && (
-                  <div className="mb-6 p-4 bg-emerald-50 border border-emerald-100 rounded-2xl flex items-center gap-3 text-emerald-600 text-sm">
+                  <div className="m-6 p-4 bg-emerald-50 border border-emerald-100 rounded-2xl flex items-center gap-3 text-emerald-600 text-sm">
                     <CheckCircle2 className="w-5 h-5" />
                     {success}
                   </div>
                 )}
 
-                {transactions.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="border-b border-[#f0f0f0]">
-                          <th className="py-4 px-2 text-[10px] font-bold uppercase tracking-widest text-[#9e9e9e]">Date</th>
-                          <th className="py-4 px-2 text-[10px] font-bold uppercase tracking-widest text-[#9e9e9e]">Description</th>
-                          <th className="py-4 px-2 text-[10px] font-bold uppercase tracking-widest text-[#9e9e9e] text-right">Amount</th>
-                          <th className="py-4 px-2 text-[10px] font-bold uppercase tracking-widest text-[#9e9e9e]">Notes</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {transactions.map((t, i) => (
-                          <motion.tr 
-                            key={i}
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: i * 0.05 }}
-                            className="border-b border-[#f9f9f9] hover:bg-[#fcfcfc] transition-colors"
-                          >
-                            <td className="py-4 px-2 text-xs font-mono">{t.date}</td>
-                            <td className="py-4 px-2 text-sm">{t.description}</td>
-                            <td className={cn(
-                              "py-4 px-2 text-sm font-mono text-right",
+                {sortedTransactions.length > 0 ? (
+                  <div className="w-full">
+                    {/* Desktop Table */}
+                    <div className="hidden md:block">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-[#f0f0f0]">
+                            <th 
+                              onClick={() => toggleSort('date')}
+                              className="py-4 px-6 text-[10px] font-bold uppercase tracking-widest text-[#9e9e9e] cursor-pointer hover:text-[#1a1a1a] transition-colors"
+                            >
+                              <div className="flex items-center">Date <SortIcon field="date" /></div>
+                            </th>
+                            <th 
+                              onClick={() => toggleSort('description')}
+                              className="py-4 px-6 text-[10px] font-bold uppercase tracking-widest text-[#9e9e9e] cursor-pointer hover:text-[#1a1a1a] transition-colors"
+                            >
+                              <div className="flex items-center">Description <SortIcon field="description" /></div>
+                            </th>
+                            <th 
+                              onClick={() => toggleSort('amount')}
+                              className="py-4 px-6 text-[10px] font-bold uppercase tracking-widest text-[#9e9e9e] text-right cursor-pointer hover:text-[#1a1a1a] transition-colors"
+                            >
+                              <div className="flex items-center justify-end">Amount <SortIcon field="amount" /></div>
+                            </th>
+                            <th 
+                              onClick={() => toggleSort('notes')}
+                              className="py-4 px-6 text-[10px] font-bold uppercase tracking-widest text-[#9e9e9e] cursor-pointer hover:text-[#1a1a1a] transition-colors"
+                            >
+                              <div className="flex items-center">Notes <SortIcon field="notes" /></div>
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sortedTransactions.map((t, i) => (
+                            <motion.tr 
+                              key={i}
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: Math.min(i * 0.02, 0.5) }}
+                              className="border-b border-[#f9f9f9] hover:bg-[#fcfcfc] transition-colors"
+                            >
+                              <td className="py-4 px-6 text-xs font-mono">{t.date}</td>
+                              <td className="py-4 px-6 text-sm">{t.description}</td>
+                              <td className={cn(
+                                "py-4 px-6 text-sm font-mono text-right whitespace-nowrap",
+                                t.amount < 0 ? "text-red-500" : "text-emerald-600"
+                              )}>
+                                <span className="text-[10px] uppercase font-bold mr-2 opacity-50">
+                                  {t.amount < 0 ? "Spent" : "Received"}
+                                </span>
+                                {t.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                              <td className="py-4 px-6 text-xs text-[#9e9e9e] italic">{t.notes}</td>
+                            </motion.tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Mobile Card Layout */}
+                    <div className="md:hidden divide-y divide-[#f0f0f0]">
+                      {/* Mobile Header Sorting */}
+                      <div className="p-4 bg-[#f9f9f9] flex flex-wrap gap-2 sticky top-0 z-10">
+                        <button onClick={() => toggleSort('date')} className="px-3 py-1 bg-white rounded-full text-[10px] font-bold uppercase tracking-widest border border-black/5 flex items-center">
+                          Date <SortIcon field="date" />
+                        </button>
+                        <button onClick={() => toggleSort('description')} className="px-3 py-1 bg-white rounded-full text-[10px] font-bold uppercase tracking-widest border border-black/5 flex items-center">
+                          Desc <SortIcon field="description" />
+                        </button>
+                        <button onClick={() => toggleSort('amount')} className="px-3 py-1 bg-white rounded-full text-[10px] font-bold uppercase tracking-widest border border-black/5 flex items-center">
+                          Amt <SortIcon field="amount" />
+                        </button>
+                        <button onClick={() => toggleSort('notes')} className="px-3 py-1 bg-white rounded-full text-[10px] font-bold uppercase tracking-widest border border-black/5 flex items-center">
+                          Notes <SortIcon field="notes" />
+                        </button>
+                      </div>
+
+                      {sortedTransactions.map((t, i) => (
+                        <motion.div 
+                          key={i}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: Math.min(i * 0.02, 0.5) }}
+                          className="p-4 space-y-2"
+                        >
+                          <div className="flex justify-between items-start">
+                            <span className="text-[10px] font-mono text-[#9e9e9e]">{t.date}</span>
+                            <span className={cn(
+                              "text-sm font-mono font-bold",
                               t.amount < 0 ? "text-red-500" : "text-emerald-600"
                             )}>
-                              <span className="text-[10px] uppercase font-bold mr-2 opacity-50">
-                                {t.amount < 0 ? "Spent" : "Received"}
-                              </span>
                               {t.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
-                            <td className="py-4 px-2 text-xs text-[#9e9e9e] italic">{t.notes}</td>
-                          </motion.tr>
-                        ))}
-                      </tbody>
-                    </table>
+                            </span>
+                          </div>
+                          <div className="text-sm font-medium">{t.description}</div>
+                          {t.notes && (
+                            <div className="text-xs text-[#9e9e9e] italic bg-[#f9f9f9] p-2 rounded-lg">
+                              {t.notes}
+                            </div>
+                          )}
+                        </motion.div>
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   <div className="h-full flex flex-col items-center justify-center text-center py-20">

@@ -9,24 +9,28 @@ export interface Transaction {
   notes: string;
 }
 
-export async function extractTransactions(fileBase64: string, mimeType: string): Promise<Transaction[]> {
+export interface FileData {
+  data: string;
+  mimeType: string;
+}
+
+export async function extractTransactions(files: FileData[]): Promise<Transaction[]> {
+  if (files.length === 0) return [];
+
+  const parts = files.map(file => ({
+    inlineData: {
+      data: file.data,
+      mimeType: file.mimeType,
+    },
+  }));
+
+  parts.push({
+    text: "List all transactions: date (YYYY-MM-DD), description, amount (negative for spent, positive for received), notes. JSON array only.",
+  } as any);
+
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
-    contents: [
-      {
-        parts: [
-          {
-            inlineData: {
-              data: fileBase64,
-              mimeType: mimeType,
-            },
-          },
-          {
-            text: "Extract all transactions from this bank statement. For each transaction, provide the date, description, amount, and any relevant notes. Use negative numbers for expenses/spending and positive numbers for income/deposits. Return the data as a JSON array of objects.",
-          },
-        ],
-      },
-    ],
+    contents: [{ parts }],
     config: {
       thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       responseMimeType: "application/json",
@@ -35,10 +39,10 @@ export async function extractTransactions(fileBase64: string, mimeType: string):
         items: {
           type: Type.OBJECT,
           properties: {
-            date: { type: Type.STRING, description: "The date of the transaction" },
-            description: { type: Type.STRING, description: "The title or description of the transaction" },
-            amount: { type: Type.NUMBER, description: "The transaction amount. Use negative for expenses/spending and positive for income/deposits." },
-            notes: { type: Type.STRING, description: "Any additional notes or categories inferred" },
+            date: { type: Type.STRING },
+            description: { type: Type.STRING },
+            amount: { type: Type.NUMBER },
+            notes: { type: Type.STRING },
           },
           required: ["date", "description", "amount"],
         },
